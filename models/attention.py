@@ -13,7 +13,13 @@ import torch.nn.functional as F
 
 from GPT.config import GPTConfig
 from torchtune.modules import RotaryPositionalEmbeddings
-from pos_embd import OriginalEmbedding
+
+# NOTE: OriginalEmbedding (sinusoidal PE) is intentionally NOT imported or used here.
+# Absolute positional embeddings must be added once — in GPT.forward() before the block stack.
+# See GPT/GPT.py for where and why.
+#
+# RoPE *is* applied here because it works differently: it rotates Q and K vectors inside each
+# attention layer without ever writing to the residual stream, so applying it per-layer is correct.
 
 class Attention(nn.Module):
     '''Basic implementation of the attention mechanism.'''
@@ -23,16 +29,13 @@ class Attention(nn.Module):
 
         if config.n_embd % config.num_heads != 0:
             raise ValueError(f"Embedding dimension {config.n_embd} must be divisible by the number of heads {config.num_heads}.")
-        
-        self.head_dim =config.n_embd//config.num_heads
+
+        self.head_dim = config.n_embd // config.num_heads
         self.proj = nn.Linear(config.n_embd, config.n_embd * 3) # this takes input and turns it into  q,k,v
         self.attn = nn.Linear(config.n_embd, config.n_embd) # this takes the output from attention and projects it back into the original dimensions
-        
-        if config.use_from_scratch:
-            # Sinusoidal: applied to x (full d_model) before QKV projection
-            self.pos_embd = OriginalEmbedding(d_model=config.n_embd, max_len=config.block_size)
-        else:
-            # RoPE: applied per-head to Q and K after projection (operates on head_dim)
+
+        if not config.use_from_scratch:
+            # RoPE: applied per-head to Q and K after projection (operates on head_dim, not d_model)
             self.rope = RotaryPositionalEmbeddings(dim=self.head_dim, max_seq_len=config.block_size)
 
         self.bias: torch.Tensor
@@ -43,11 +46,8 @@ class Attention(nn.Module):
 
         B, T, C = x.size() # batch size, sequence length, embedding dimension
 
-        # Sinusoidal PE is additive to token representations — applied here, before any projection.
-        # This means the model learns Q/K/V on already-position-aware tokens.
-        if self.config.use_from_scratch:
-            x = self.pos_embd(x) # (B, T, n_embd)
-
+        # By the time x reaches here it is already position-aware — sinusoidal PE was applied
+        # once in GPT.forward() before the block stack. No PE application needed here.
         q, k, v = self.proj(x).chunk(3, dim=-1) # (B, T, n_embd) -> (B, T, n_embd) for q, k, v
 
         q = q.view(B, T, self.config.num_heads, self.head_dim).transpose(1, 2) # (B, num_heads, T, head_dim)
@@ -62,7 +62,8 @@ class Attention(nn.Module):
             # So for the first token, we mask all tokens ahead of it, for the second token, we mask all tokens ahead of it, and so on.
             # So if block_size = 1024, and the current sequence is 8, we slice out (1,1,8,8) from the prebuilt buffer (1,1,1024,1024)
             # Pytorch broadcasting then expands the (1,1,8,8) to (B, num_heads, 8, 8) and applies the mask to the attention scores.
-            # thus, the result after masked fill is a matrix where the upper triangle is -inf and lower diagon/triangle is unchanged
+            # thus, the result after masked fill is a matrix where the lower triangle is -inf and upper diagonal/triangle is unchanged
+            #A great visualization and explanation of this can be found here in a video by 3b1b (timestamp around 11 minutes): https://www.youtube.com/watch?v=eMlx5fFNoYc
             attn = torch.softmax(attn, dim=-1) # (B, num_heads, T, T)
             # now we multiply the attn score against the values
             attn = attn @ v # (B, num_heads, T, head_dim)

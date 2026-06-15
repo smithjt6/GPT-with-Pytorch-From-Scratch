@@ -6,6 +6,7 @@
 #TODO: Add in more information and explain step-by-step how this is working in reference to the original paper
 
 import torch
+import torch.nn as nn
 
 from GPT.config import GPTConfig
 from mlp import MLP
@@ -15,13 +16,23 @@ from layernorm import LayerNorm
 class AttentionBlock(torch.nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
-        config = GPTConfig() # we can also pass in a custom config if we want to change the default values.
-        self.ln1 = LayerNorm(config.n_embd)
-        self.attn = Attention(config)
-        self.ln2 = LayerNorm(config.n_embd)
-        self.mlp = MLP(d_model=config.n_embd, d_hidden = 4*config.n_embd)
+        self.config = config
+        self.ln1 = LayerNorm(self.config.n_embd) if config.use_from_scratch else nn.LayerNorm(self.config.n_embd)
+        self.attn = Attention(self.config)
+        self.ln2 = LayerNorm(self.config.n_embd) if config.use_from_scratch else nn.LayerNorm(self.config.n_embd)
+        self.mlp = MLP(d_model=self.config.n_embd, d_hidden = 4*self.config.n_embd)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x)) # attention with residual connection
-        x = x + self.mlp(self.ln2(x)) # mlp with residual connection
+        # This is PRE-NORM (used by GPT-2 and most modern transformers)
+        # LN --> sublayer --> residual
+        #
+        # The original "Attention Is All You Need" paper used POST-NORM (LN after residual)
+        #
+        # Pre-norm is more stable for deep networks because the residual stream is
+        # normalised BEFORE each sublayer sees it. Post-norm is a headache to work with and GPT-2 shows it performs better to use pre-norm.
+        #
+        # Pre-norm means the final block's output is never post-normalised,
+        # which is why GPT.py adds a standalone ln_f after all the blocks. (see the class GPT)
+        x = x + self.attn(self.ln1(x))
+        x = x + self.mlp(self.ln2(x))
         return x
