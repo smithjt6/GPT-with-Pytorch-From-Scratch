@@ -17,3 +17,4 @@ class GPTConfig:
     learning_rate: float = 3e-4         # The learning rate, this is how much we will update the model's weights during training.
     batch_size: int = 64                # The batch size, this is how many samples we will use to calculate the loss and update the model's weights during training.
     weight_decay: float = 0.01          # The weight decay, this is used to prevent overfitting by adding a penalty to the loss function for large weights.
+    save_path: str = 'gpt_model.pth'    # The path to save the trained model, this is where the model's weights will be saved after training.

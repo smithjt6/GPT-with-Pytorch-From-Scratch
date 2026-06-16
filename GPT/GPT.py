@@ -17,12 +17,8 @@ class GPT(nn.Module):
         super().__init__()
 
         self.config = config
+        self.save_path = config.save_path
         self.device = device
-
-        # Now technically, this is a training arugement. However, we are containing everything into this single class (which basically never happens in production)
-        # The trainer is kept within the model class just to make it simple to call in the ipynb. 
-        # Typically, in production/research code you construct a specific trainer class
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay)
 
         # In "Attention Is All You Need" (Vaswani et al., 2017) and GPT-2/3, absolute positional
         # embeddings are added ONCE — right after the token embedding, before any transformer block.
@@ -87,10 +83,6 @@ class GPT(nn.Module):
             if end_token_id is not None and next_token.item() == end_token_id:
                 break
         return idx
-    
-    #TODO: Finish the training here
-    def train_model(self):
-        raise NotImplementedError("This is just a skeleton implementation, the train_model function is not implemented yet. This is just to show how the pieces fit together.")
 
     def save(self, path: str) -> None:
         '''Save model weights and config to a .pt file.'''
@@ -99,7 +91,7 @@ class GPT(nn.Module):
         print(f"Model saved --> {path}")
     
     @classmethod
-    def load(cls, path: str, device: torch.device | str = "cpu") -> "GPT":
+    def load(cls, path: str, device: torch.device) -> "GPT":
         '''Load a model saved with save(). Returns a GPT instance ready for inference or further training.'''
         checkpoint = torch.load(path, map_location=device, weights_only=True)
         config = GPTConfig(**checkpoint["config"])
