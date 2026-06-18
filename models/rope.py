@@ -1,0 +1,1 @@
+#TODO: implement Rope Embeddings from scratch here and add the keyword option to use from scratch rope in the config + attention class

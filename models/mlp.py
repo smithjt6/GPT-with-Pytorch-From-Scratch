@@ -9,7 +9,7 @@
 
 import torch.nn as nn
 
-from ..utils.utility import get_activation
+from utils.utility import get_activation
 from typing import List, Optional
 
 class MLP(nn.Module):

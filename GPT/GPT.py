@@ -1,5 +1,5 @@
 # Now we put together the pieces to create the GPT model. To see the configurations see GPT/config.py
-#TODO: Add in docs/explanation for the GPT functions. Add in the configuratiions for training
+#TODO: Add in docs/explanation for the GPT functions. Add in the configuratiions for training. Fix type error throwing with class method load device
 
 import os
 import torch
@@ -8,7 +8,7 @@ import torch.nn as nn
 from models.attention_block import AttentionBlock
 from models.pos_embd import OriginalEmbedding
 from models.layernorm import LayerNorm
-from config import GPTConfig
+from GPT.config import GPTConfig
 from dataclasses import asdict
 
 class GPT(nn.Module):
@@ -30,6 +30,10 @@ class GPT(nn.Module):
         # RoPE, however, does NOT live here —-> it is applied to Q and K inside each Attention layer, which is
         # mathematically correct because it only rotates the query/key projections and never touches
         # the residual stream that flows between blocks.
+        # Token embedding: maps discrete token IDs --> dense vectors before any positional encoding.
+        
+        self.tok_embd = nn.Embedding(config.vocab_size, config.n_embd)
+
         if config.use_from_scratch:
             self.pos_embd = OriginalEmbedding(d_model=config.n_embd, max_len=config.block_size)
 
@@ -51,10 +55,9 @@ class GPT(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         '''Forward pass through the GPT model.'''
-        # Apply sinusoidal PE here — once, before the stack of transformer blocks.
-        # After this point every block sees position-aware token representations, just like the paper.
+        x = self.tok_embd(x)        # (B, T) → (B, T, n_embd)
         if self.config.use_from_scratch:
-            x = self.pos_embd(x)
+            x = self.pos_embd(x)    # add sinusoidal PE once before the block stack
 
         x = self.blocks(x)
         x = self.ln_f(x)   # normalise residual stream before the logit projection
@@ -86,7 +89,9 @@ class GPT(nn.Module):
 
     def save(self, path: str) -> None:
         '''Save model weights and config to a .pt file.'''
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         torch.save({"config": asdict(self.config), "state_dict": self.state_dict()}, path)
         print(f"Model saved --> {path}")
     
@@ -95,7 +100,7 @@ class GPT(nn.Module):
         '''Load a model saved with save(). Returns a GPT instance ready for inference or further training.'''
         checkpoint = torch.load(path, map_location=device, weights_only=True)
         config = GPTConfig(**checkpoint["config"])
-        model  = cls(config)
+        model  = cls(config, device)
         model.load_state_dict(checkpoint["state_dict"])
         model.to(device)
         print(f"Model loaded <-- {path}  ({sum(p.numel() for p in model.parameters()):,} params)")
